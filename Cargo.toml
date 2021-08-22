@@ -1,8 +1,16 @@
 [package]
-name = "fight_for_your_life"
+name = "fight-for-your-life"
 version = "0.1.0"
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "ggez"
+path = "src/bin/ggez.rs"
+
+[[bin]]
+name = "bevy"
+path = "src/bin/bevy.rs"
 
 [dependencies]
+ggez = "0.6.0"
+lazy_static = "1.4.0"
