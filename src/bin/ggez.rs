@@ -1,15 +1,19 @@
+use std::ops::Index;
 use std::path::{PathBuf};
+use std::process::exit;
+use std::time::Instant;
 
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::input::keyboard;
 use ggez::{Context, ContextBuilder, GameResult, timer};
 use ggez::graphics::{self, Color, DrawParam, FillOptions, MeshBuilder, Rect, StrokeOptions};
-use ggez::event::{self, EventHandler, KeyCode, KeyMods};
+use ggez::event::{self, EventHandler, KeyCode, KeyMods, quit};
 
 use lazy_static::lazy_static;
 
 type Point2f = ggez::mint::Point2<f32>;
-type Point2 = ggez::mint::Point2<usize>;
+type Point2u = ggez::mint::Point2<usize>;
+type Point2i = ggez::mint::Point2<isize>;
 
 // BLOCK_SIZE is a common perfect divisor of WINDOW_X - 2*HP_BAR_WIDTH and WINDOW_Y.
 // Horizontal and vertical blocks are the division (WINDOW_X - 2*HP_BAR_WIDTH) / BLOCK_SIZE and WINDOW_Y / BLOCK_SIZE respectively
@@ -28,7 +32,7 @@ const AREA_WIDTH  : f32 = (HORIZONTAL_BLOCKS/4) as f32 * BLOCK_SIZE;
 const AREA_LENGTH : f32 = (VERTICAL_BLOCKS-2) as f32 * BLOCK_SIZE;
 
 const DESIRED_FPS: u32 = 60;
-const PLAYER_MOVEMENT_DELAY: f32 = 0.3;
+const GENERATION_CALCULATION_DELAY: f32 = 0.6;
 
 
 lazy_static! {
@@ -37,9 +41,15 @@ lazy_static! {
 }
 
 #[macro_use]
-macro_rules! point {
+macro_rules! pointu {
     ($x:expr,$y:expr) => {
-        Point2{x:$x,y:$y}
+        Point2u{x:$x,y:$y}
+    }
+}
+#[macro_use]
+macro_rules! pointi {
+    ($x:expr,$y:expr) => {
+        Point2i{x:$x,y:$y}
     }
 }
 #[macro_use]
@@ -63,169 +73,85 @@ enum Direction {
     DOWN
 }
 
+#[derive(Debug,PartialEq)]
+enum GameState {
+    PLAYING,
+    PAUSE_MENU,
+    WINNER_SCREEN
+}
+
 #[derive(Debug)]
 struct Player {
     pub player_num: PlayerNum,
     pub input_state: InputState,
-    pub elapsed_time_since_move: f32,
+    pub movement_cooldown_time: f32,
     pub life_color_index: usize,
-    pub hovering_square: Point2,
-    pub selected_squares: Vec<Point2>,
+    pub hovering_square: Point2u,
+    pub selected_squares: Vec<Point2u>,
     _x_left_bound: usize,
     _x_right_bound: usize,
     _y_upper_bound: usize,
     _y_lower_bound: usize,
 }
 
-#[derive(Debug,Default)]
+#[derive(Debug)]
 struct InputState {
-    x_axis_value: isize,
-    y_axis_value: isize,
+    movement_vector: Point2i,
     mark_pressed: bool,
     deploy_pressed: bool
 }
 
+
 #[derive(Debug)]
-struct GameState {
+struct Game {
+    game_state: GameState,
     player1: Player,
     player2: Player,
     board: [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
 }
 
 
-impl Player {
-    pub fn new(player_num: PlayerNum) -> Self {
-        let _x_left_bound = match player_num {
-            PlayerNum::ONE => (AREA_1_X / BLOCK_SIZE) as usize,
-            PlayerNum::TWO => (AREA_2_X / BLOCK_SIZE) as usize
-        };
-        let _x_right_bound = _x_left_bound + (AREA_WIDTH / BLOCK_SIZE) as usize - 1;
-        let _y_upper_bound = 1usize;
-        let _y_lower_bound = VERTICAL_BLOCKS - 2;
+fn calculate_next_generation(board: &mut [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) {
 
-        let hovering_square_point = match player_num {
-            PlayerNum::ONE => point![(AREA_1_X + AREA_WIDTH/2.0) as usize / BLOCK_SIZE as usize, (VERTICAL_BLOCKS/2)],
-            PlayerNum::TWO => point![(AREA_2_X + AREA_WIDTH/2.0) as usize / BLOCK_SIZE as usize, (VERTICAL_BLOCKS/2)]
-        };
-
-        Player {
-            player_num,
-            input_state: InputState::default(),
-            elapsed_time_since_move: 0.0,
-            life_color_index: 0,
-            hovering_square : hovering_square_point,
-            selected_squares: Vec::with_capacity(20),
-            _x_left_bound,
-            _x_right_bound,
-            _y_upper_bound,
-            _y_lower_bound
-        }
-    }
-
-    pub fn is_dead(&self) -> bool {
-        self.life_color_index == 5
-    }
-
-    pub fn take_damage(&mut self) {
-        self.life_color_index +=1; 
-    }
-
-    pub fn move_hover(&mut self, dir: Direction) {
-        match dir {
-            Direction::UP => {
-                if self.hovering_square.y -1 < self._y_upper_bound {
-                    self.hovering_square.y = self._y_lower_bound;
-                } else {
-                    self.hovering_square.y -= 1; 
-                }
-            },
-            Direction::RIGHT => {
-                if self.hovering_square.x + 1 > self._x_right_bound {
-                    self.hovering_square.x = self._x_left_bound;
-                } else {
-                    self.hovering_square.x += 1; 
-                }
-            },
-            Direction::DOWN => {
-                if self.hovering_square.y + 1 > self._y_lower_bound {
-                    self.hovering_square.y = self._y_upper_bound;
-                } else {
-                    self.hovering_square.y += 1; 
-                }
-            },
-            Direction::LEFT => {
-                if self.hovering_square.x - 1 < self._x_left_bound {
-                    self.hovering_square.x = self._x_right_bound;
-                } else {
-                    self.hovering_square.x -= 1; 
-                }
-            }
-        }
-    }
 }
 
-
-impl GameState {
-    pub fn new(ctx: &mut Context) -> GameState {
-        GameState {
-            player1:  Player::new(PlayerNum::ONE),
-            player2:  Player::new(PlayerNum::TWO),
-            board: [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
-        }
-    }
+fn draw_pause_menu(ctx: &Context, game: &Game) {
+    
 }
 
+fn draw_winner_screen(ctx: &Context, game: &Game) {
 
-fn update_player_state(player: &mut Player, seconds_elapsed: f32) {
-    player.elapsed_time_since_move += seconds_elapsed;
-    println!("elapsed: {} , sum: {}",seconds_elapsed, player.elapsed_time_since_move);
-    if player.elapsed_time_since_move < PLAYER_MOVEMENT_DELAY {return} 
-
-    if player.input_state.mark_pressed {
-        player.selected_squares.push(player.hovering_square);
-    }
-
-    if player.input_state.deploy_pressed {
-        //game of life logic
-    }
-
-    if player.input_state.x_axis_value == -1 {
-        move_left_checked(player);
-        player.elapsed_time_since_move = 0.0;
-    } else if player.input_state.x_axis_value == 1 {
-        move_right_checked(player);
-        player.elapsed_time_since_move = 0.0;
-    }
-
-    if player.input_state.y_axis_value == -1 {
-        move_up_checked(player);
-        player.elapsed_time_since_move = 0.0;
-    } else if player.input_state.y_axis_value == 1 {
-        mov3_down_checked(player);
-        player.elapsed_time_since_move = 0.0;
-    }
-
-    player.input_state.mark_pressed = false; //remove
-    player.input_state.deploy_pressed = false; //remove
 }
 
-impl EventHandler<ggez::GameError> for GameState {
+impl EventHandler<ggez::GameError> for Game {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        let seconds = 1.0 / DESIRED_FPS as f32;
+        if self.game_state != GameState::PLAYING {return Ok(())}
 
+        let seconds = 1.0 / DESIRED_FPS as f32;
         while timer::check_update_time(ctx, DESIRED_FPS) {
-            update_player_state(&mut self.player1, seconds);
-            update_player_state(&mut self.player2, seconds);
+            calculate_next_generation(&mut self.board);
+
+            if self.player1.is_dead() {
+                // self.winner = Some(self.player2);
+                println!("player 2 won");
+                ggez::event::quit(ctx);
+            }
+            if self.player2.is_dead() {
+                return Ok(())
+            } 
         }
 
-        
         Ok(())
     }
     
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
-        graphics::clear(ctx, Color::WHITE);
+        graphics::clear(ctx, Color::from_rgb(170,170,170));
 
-        draw_board(ctx, self)?;
+        match self.game_state {
+            GameState::PLAYING => draw_board(ctx, self)?,
+            GameState::PAUSE_MENU => draw_pause_menu(ctx, self),
+            GameState::WINNER_SCREEN => draw_winner_screen(ctx, self)
+        }
         
         graphics::present(ctx)?;
         timer::yield_now();
@@ -233,85 +159,77 @@ impl EventHandler<ggez::GameError> for GameState {
     }
 
     fn key_down_event(&mut self, ctx: &mut Context, key: KeyCode, mods: KeyMods, repeat: bool) {
+        if repeat {return}
+        
         match key {
             // Player1
             KeyCode::W => {
-                self.player1.input_state.y_axis_value -=1;
+                let amount = if mods.contains(KeyMods::ALT) {3} else {1};
+                self.player1.move_hover(Direction::UP, amount)
             },
             KeyCode::D => {
-                self.player1.input_state.x_axis_value +=1;
+                let amount = if mods.contains(KeyMods::ALT) {3} else {1};
+                self.player1.move_hover(Direction::RIGHT, amount)
             },
             KeyCode::S => {
-                self.player1.input_state.y_axis_value +=1;
+                let amount = if mods.contains(KeyMods::ALT) {3} else {1};
+                self.player1.move_hover(Direction::DOWN, amount)
             },
             KeyCode::A => {
-                self.player1.input_state.x_axis_value -=1;
+                let amount = if mods.contains(KeyMods::ALT) {3} else {1};
+                self.player1.move_hover(Direction::LEFT, amount)
             },
             KeyCode::C => {
-                self.player1.input_state.mark_pressed = true;
+                let index = self.player1.selected_squares.iter().position(|x| *x == self.player1.hovering_square);
+                if let Some(i) = index {
+                    self.player1.selected_squares.remove(i);
+                } else {
+                    self.player1.selected_squares.push(self.player1.hovering_square);
+                }
             },
             KeyCode::Space => {
-                self.player1.input_state.deploy_pressed = true;
+                for p in self.player2.selected_squares.iter() {
+                    self.board[p.x][p.y] = true;
+                }
+                self.player1.selected_squares.clear();
             },
             //Player2
             KeyCode::Up => {
-                self.player2.input_state.y_axis_value -=1;
+                let amount = if mods.contains(KeyMods::CTRL) {3} else {1};
+                self.player2.move_hover(Direction::UP, amount)
             },
             KeyCode::Right => {
-                self.player2.input_state.x_axis_value +=1;
+                let amount = if mods.contains(KeyMods::CTRL) {3} else {1};
+                self.player2.move_hover(Direction::RIGHT, amount)
             },
             KeyCode::Down => {
-                self.player2.input_state.y_axis_value +=1;
+                let amount = if mods.contains(KeyMods::CTRL) {3} else {1};
+                self.player2.move_hover(Direction::DOWN, amount)
             },
             KeyCode::Left => {
-                self.player2.input_state.x_axis_value -=1;
+                let amount = if mods.contains(KeyMods::CTRL) {3} else {1};
+                self.player2.move_hover(Direction::LEFT, amount)
             },
             KeyCode::RShift => {
-                self.player2.input_state.mark_pressed = true;
+                let index = self.player2.selected_squares.iter().position(|x| *x == self.player2.hovering_square);
+                if let Some(i) = index {
+                    self.player2.selected_squares.remove(i);
+                } else {
+                    self.player2.selected_squares.push(self.player2.hovering_square);
+                }
             },
             KeyCode::Return => {
-                self.player2.input_state.deploy_pressed = true;
-            },
-            _ => ()
-        }
-    }
-
-    
-    fn key_up_event(&mut self, ctx: &mut Context, key: KeyCode, mods: KeyMods) {
-        match key {
-            // Player1
-            KeyCode::W => {
-                self.player1.input_state.y_axis_value +=1;
-            },
-            KeyCode::D => {
-                self.player1.input_state.x_axis_value -=1;
-            },
-            KeyCode::S => {
-                self.player1.input_state.y_axis_value -=1;
-            },
-            KeyCode::A => {
-                self.player1.input_state.x_axis_value +=1;
-            },
-            //Player2
-            KeyCode::Up => {
-                self.player2.input_state.y_axis_value +=1;
-            },
-            KeyCode::Right => {
-                self.player2.input_state.x_axis_value -=1;
-            },
-            KeyCode::Down => {
-                self.player2.input_state.y_axis_value -=1;
-            },
-            KeyCode::Left => {
-                self.player2.input_state.x_axis_value +=1;
+                for p in self.player2.selected_squares.iter() {
+                    self.board[p.y][p.x] = true;
+                }
+                self.player2.selected_squares.clear();
             },
             _ => ()
         }
     }
 }
 
-
-fn draw_board(ctx: &mut Context, game_state: &mut GameState) -> GameResult<()> {
+fn draw_board(ctx: &mut Context, game_state: &mut Game) -> GameResult<()> {
     let mut mb = MeshBuilder::new();
     let rect_draw_fill_mode = graphics::DrawMode::Fill(FillOptions::default());
     let rect_draw_stroke_mode = graphics::DrawMode::Stroke(StrokeOptions::default().with_line_width(1.0));
@@ -400,6 +318,101 @@ fn draw_board(ctx: &mut Context, game_state: &mut GameState) -> GameResult<()> {
 }
 
 
+impl Player {
+    pub fn new(player_num: PlayerNum) -> Self {
+        let _x_left_bound = match player_num {
+            PlayerNum::ONE => (AREA_1_X / BLOCK_SIZE) as usize,
+            PlayerNum::TWO => (AREA_2_X / BLOCK_SIZE) as usize
+        };
+        let _x_right_bound = _x_left_bound + (AREA_WIDTH / BLOCK_SIZE) as usize - 1;
+        let _y_upper_bound = 1usize;
+        let _y_lower_bound = VERTICAL_BLOCKS - 2;
+
+        let hovering_square_point = match player_num {
+            PlayerNum::ONE => pointu![(AREA_1_X + AREA_WIDTH/2.0) as usize / BLOCK_SIZE as usize, (VERTICAL_BLOCKS/2)],
+            PlayerNum::TWO => pointu![(AREA_2_X + AREA_WIDTH/2.0) as usize / BLOCK_SIZE as usize, (VERTICAL_BLOCKS/2)]
+        };
+
+        Player {
+            player_num,
+            input_state: InputState::default(),
+            movement_cooldown_time: 0.0,
+            life_color_index: 0,
+            hovering_square : hovering_square_point,
+            selected_squares: Vec::with_capacity(20),
+            _x_left_bound,
+            _x_right_bound,
+            _y_upper_bound,
+            _y_lower_bound
+        }
+    }
+
+    pub fn is_dead(&self) -> bool {
+        self.life_color_index == 5
+    }
+
+    pub fn take_damage(&mut self) {
+        self.life_color_index +=1; 
+    }
+
+    pub fn move_hover(&mut self, dir: Direction, mut amount: usize) {
+        match dir {
+            Direction::UP => {
+                if amount > self.hovering_square.y {amount = self.hovering_square.y};
+                if self.hovering_square.y - amount < self._y_upper_bound {
+                    self.hovering_square.y = self._y_lower_bound;
+                } else {
+                    self.hovering_square.y -= amount; 
+                }
+            },
+            Direction::RIGHT => {
+                if self.hovering_square.x + amount > self._x_right_bound {
+                    self.hovering_square.x = self._x_left_bound;
+                } else {
+                    self.hovering_square.x += amount; 
+                }
+            },
+            Direction::DOWN => {
+                if self.hovering_square.y + amount > self._y_lower_bound {
+                    self.hovering_square.y = self._y_upper_bound;
+                } else {
+                    self.hovering_square.y += amount; 
+                }
+            },
+            Direction::LEFT => {
+                if amount > self.hovering_square.x {amount = self.hovering_square.y};
+                if self.hovering_square.x - amount < self._x_left_bound {
+                    self.hovering_square.x = self._x_right_bound;
+                } else {
+                    self.hovering_square.x -= amount; 
+                }
+            }
+        }
+    }
+}
+
+impl Game {
+    pub fn new(ctx: &mut Context) -> Game {
+        Game {
+            game_state: GameState::PLAYING,
+            player1:  Player::new(PlayerNum::ONE),
+            player2:  Player::new(PlayerNum::TWO),
+            board: [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
+        }
+    }
+}
+
+impl InputState {
+    pub fn default() -> Self {
+        InputState {
+            movement_vector: pointi![0,0],
+            mark_pressed: false,
+            deploy_pressed: false
+        }
+    }
+}
+
+
 fn move_right_checked(player: &mut Player) {
     if player.hovering_square.x + 1 > player._x_right_bound {
         player.hovering_square.x = player._x_left_bound;
@@ -416,7 +429,7 @@ fn move_up_checked(player: &mut Player) {
     }
 }
 
-fn mov3_down_checked(player: &mut Player) {
+fn move_down_checked(player: &mut Player) {
     if player.hovering_square.y + 1 > player._y_lower_bound {
         player.hovering_square.y = player._y_upper_bound;
     } else {
@@ -456,7 +469,7 @@ fn main() {
         window.set_outer_position(pos);
     }
 
-    let game_state = GameState::new(&mut ctx);
+    let game_state = Game::new(&mut ctx);
 
     event::run(ctx, event_loop, game_state);
 }
