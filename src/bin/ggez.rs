@@ -1,10 +1,7 @@
 use std::ops::Index;
 use std::path::{PathBuf};
-use std::process::exit;
-use std::time::Instant;
 
 use ggez::conf::{WindowMode, WindowSetup};
-use ggez::input::keyboard;
 use ggez::{Context, ContextBuilder, GameResult, timer};
 use ggez::graphics::{self, Color, DrawParam, FillOptions, MeshBuilder, PxScale, Rect, StrokeOptions};
 use ggez::event::{self, EventHandler, KeyCode, KeyMods, quit};
@@ -17,13 +14,20 @@ type Point2i = ggez::mint::Point2<isize>;
 
 // BLOCK_SIZE is a common perfect divisor of WINDOW_X - 2*HP_BAR_WIDTH and WINDOW_Y.
 // Horizontal and vertical blocks are the division (WINDOW_X - 2*HP_BAR_WIDTH) / BLOCK_SIZE and WINDOW_Y / BLOCK_SIZE respectively
-// These hardcoded values should only be changed in the above conditions are met.
+// These hardcoded values should only be changed if the above conditions are met.
 const WINDOW_X     : f32 = 1502.0;
 const WINDOW_Y     : f32 = 952.0;
 const HP_BAR_WIDTH : f32 = 20.0;
 const BLOCK_SIZE   : f32 = 34.0;
 const HORIZONTAL_BLOCKS : usize = 43;
 const VERTICAL_BLOCKS   : usize = 28;
+
+// const WINDOW_X     : f32 = 1479.0;
+// const WINDOW_Y     : f32 = 957.0;
+// const HP_BAR_WIDTH : f32 = 20.0;
+// const BLOCK_SIZE   : f32 = 29.0;
+// const HORIZONTAL_BLOCKS : usize = 51;
+// const VERTICAL_BLOCKS   : usize = 33;
 
 const AREA_1_X : f32 = (HORIZONTAL_BLOCKS/8) as f32 * BLOCK_SIZE + HP_BAR_WIDTH;
 const AREA_2_X_OFFSET : f32 = if HORIZONTAL_BLOCKS % 2 == 0 {1.0} else {0.0};
@@ -32,7 +36,7 @@ const AREA_WIDTH  : f32 = (HORIZONTAL_BLOCKS/4) as f32 * BLOCK_SIZE;
 const AREA_LENGTH : f32 = (VERTICAL_BLOCKS-2) as f32 * BLOCK_SIZE;
 
 const DESIRED_FPS: u32 = 60;
-const GENERATION_CALCULATION_DELAY: f32 = 0.6;
+const GENERATION_CALCULATION_DELAY: f32 = 0.15;
 
 
 lazy_static! {
@@ -63,7 +67,7 @@ macro_rules! pointf {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 enum PlayerNum {
     ONE,
     TWO
@@ -105,38 +109,33 @@ struct InputState {
     deploy_pressed: bool
 }
 
-
 #[derive(Debug)]
 struct Game {
-    game_state: GameState,
+    state: GameState,
+    timer: f32,
     player1: Player,
     player2: Player,
+    winner: Option<PlayerNum>,
     board: [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
 }
 
 
-fn calculate_next_generation(board: &mut [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) {
-
-}
-
-
-
 impl EventHandler<ggez::GameError> for Game {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        if self.game_state != GameState::PLAYING {return Ok(())}
+        if self.state != GameState::PLAYING {return Ok(())}
 
         let seconds = 1.0 / DESIRED_FPS as f32;
+        self.timer += seconds;
+        
         while timer::check_update_time(ctx, DESIRED_FPS) {
-            calculate_next_generation(&mut self.board);
+            if self.timer < GENERATION_CALCULATION_DELAY {continue}
+            self.timer = 0.0;
 
-            if self.player1.is_dead() {
-                // self.winner = Some(self.player2);
-                println!("player 2 won");
-                ggez::event::quit(ctx);
-            }
-            if self.player2.is_dead() {
-                return Ok(())
-            } 
+            let next_gen_info = calculate_next_generation(&mut self.board);
+            
+            make_damage_calculations(ctx, self, next_gen_info.1);
+
+            self.board = next_gen_info.0;
         }
 
         Ok(())
@@ -145,7 +144,7 @@ impl EventHandler<ggez::GameError> for Game {
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         graphics::clear(ctx, Color::from_rgb(170,170,170));
 
-        match self.game_state {
+        match self.state {
             GameState::PLAYING => draw_board(ctx, self)?,
             GameState::PAUSE_MENU => draw_pause_menu(ctx, self)?,
             GameState::WINNER_SCREEN => draw_winner_screen(ctx, self)?
@@ -160,11 +159,26 @@ impl EventHandler<ggez::GameError> for Game {
         if repeat {return}
         
         match key {
+            KeyCode::Escape => {
+                ggez::event::quit(ctx)
+            },
             KeyCode::P => {
-                if self.game_state == GameState::PLAYING {
-                    self.game_state = GameState::PAUSE_MENU 
-                } else if self.game_state == GameState::PAUSE_MENU {
-                    self.game_state = GameState::PLAYING 
+                if self.state == GameState::PLAYING {
+                    self.state = GameState::PAUSE_MENU 
+                } else if self.state == GameState::PAUSE_MENU {
+                    self.state = GameState::PLAYING 
+                }
+            },
+            KeyCode::R => { 
+                if self.state == GameState::WINNER_SCREEN {
+                    self.reset();
+                }
+            },
+            KeyCode::B => { 
+                if self.state == GameState::WINNER_SCREEN {
+                    self.state = GameState::PLAYING
+                } else if self.state == GameState::PLAYING {
+                    self.state = GameState::WINNER_SCREEN 
                 }
             },
             // Player1
@@ -234,6 +248,7 @@ impl EventHandler<ggez::GameError> for Game {
     }
 }
 
+
 fn draw_board(ctx: &mut Context, game: &mut Game) -> GameResult<()> {
     let mut mb = MeshBuilder::new();
 
@@ -241,12 +256,12 @@ fn draw_board(ctx: &mut Context, game: &mut Game) -> GameResult<()> {
     mb.rectangle(
         *FILL_MODE,
         Rect::new(0.0, 0.0, HP_BAR_WIDTH, WINDOW_Y), 
-        Color::GREEN
+        LIFE_COLORS[game.player1.life_color_index] 
     )?;
     mb.rectangle(
         *FILL_MODE,
         Rect::new(WINDOW_X - HP_BAR_WIDTH, 0.0, HP_BAR_WIDTH, WINDOW_Y), 
-        Color::GREEN
+        LIFE_COLORS[game.player2.life_color_index] 
     )?;
 
     // the board
@@ -372,7 +387,189 @@ finilize selected tiles : Space - (Player1) , Enter - (Player2)")
 }
 
 fn draw_winner_screen(ctx: &mut Context, game: &Game) -> GameResult<()> {
+    let mut mb = MeshBuilder::new();
+
+    mb.rectangle(
+        *FILL_MODE,
+        Rect::new(0.0, 0.0, WINDOW_X, WINDOW_Y),
+        Color::from_rgb(106, 181, 98)
+    )?;
+
+    let mesh = &mb.build(ctx)?;
+
+    graphics::draw(ctx, mesh, DrawParam::default())?;
+
+    let winner = game.winner.clone().unwrap();
+    let player_name = if winner == PlayerNum::ONE {"Player 1!"} else {"Player 2!"};
+    let title = graphics::Text::new("Congratulations ".to_string() + player_name)
+    .set_bounds(pointf![600.0,100.0], graphics::Align::Center)
+    .set_font(graphics::Font::default(), PxScale{x: 65.0, y: 65.0 })
+    .to_owned();
+
+    graphics::draw(
+        ctx, 
+        &title,
+        DrawParam::default().dest(pointf![WINDOW_X/4.0 + 45.0, 100.0]).color(Color::from_rgb(237, 191, 104))
+    )?;
+
+    let replay = graphics::Text::new("Press R to replay! ".to_string())
+    .set_bounds(pointf![400.0,100.0], graphics::Align::Center)
+    .set_font(graphics::Font::default(), PxScale{x: 30.0, y: 30.0 })
+    .to_owned();
+
+    graphics::draw(
+        ctx, 
+        &replay,
+        DrawParam::default().dest(pointf![WINDOW_X/4.0 + 150.0, 280.0])
+    )?;
+
     Ok(())
+}
+
+//1) Any live cell with fewer than two live neighbours dies, as if by underpopulation.
+//2) Any live cell with two or three live neighbours lives on to the next generation.
+//3) Any live cell with more than three live neighbours dies, as if by overpopulation.
+//4) Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction.
+fn calculate_next_generation(board: &mut [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) -> ([[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS],(bool,bool)) {
+    let mut next_gen_board = [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS];
+    for (y,line) in board.iter().enumerate() {
+        for (x, cell) in line.iter().enumerate() {
+            let alive_neighbours = count_alive_neighbours(x,y,board);
+            if *cell {
+                if alive_neighbours == 3 || alive_neighbours == 2 {
+                    next_gen_board[y][x] = true;
+                }
+            } else {
+                if alive_neighbours == 3 {
+                    next_gen_board[y][x] = true;
+                }
+            }
+        }
+    }
+
+    (next_gen_board, check_for_damage(board))
+}
+
+fn count_alive_neighbours(x: usize, y: usize, board: &[[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) -> usize {
+    let mut count = 0;
+    if y == 0 || y == VERTICAL_BLOCKS - 1 || x == 0 || x == HORIZONTAL_BLOCKS - 1 {
+        if y == 0 {
+            if x == 0 {
+                if board[y+1][x]   {count += 1}
+                if board[y+1][x+1] {count += 1}
+                if board[y][x+1]   {count += 1}
+                return count
+            } else if x == HORIZONTAL_BLOCKS - 1 {
+                if board[y+1][x]   {count += 1}
+                if board[y+1][x-1] {count += 1}
+                if board[y][x-1]   {count += 1}
+                return count
+            } else {
+                if board[y+1][x-1] {count += 1}
+                if board[y+1][x]   {count += 1}
+                if board[y+1][x+1] {count += 1}
+                if board[y][x-1]   {count += 1}
+                if board[y][x+1]   {count += 1}
+                return count
+            }
+        } else if y == VERTICAL_BLOCKS - 1 {
+            if x == 0 {
+                if board[y-1][x]   {count += 1}
+                if board[y-1][x+1] {count += 1}
+                if board[y][x+1]   {count += 1}
+                return count
+            } else if x == HORIZONTAL_BLOCKS - 1 {
+                if board[y-1][x]   {count += 1}
+                if board[y-1][x-1] {count += 1}
+                if board[y][x-1]   {count += 1}
+                return count
+            } else {
+                if board[y-1][x-1] {count += 1}
+                if board[y-1][x]   {count += 1}
+                if board[y-1][x+1] {count += 1}
+                if board[y][x-1]   {count += 1}
+                if board[y][x+1]   {count += 1}
+                return count
+            }
+        } 
+
+        if x == 0 {
+            if board[y-1][x+1] {count += 1}
+            if board[y][x+1]   {count += 1}
+            if board[y+1][x+1] {count += 1}
+            if board[y-1][x]   {count += 1}
+            if board[y+1][x]   {count += 1}
+            return count
+        } else if x == HORIZONTAL_BLOCKS - 1 {
+            if board[y-1][x-1] {count += 1}
+            if board[y][x-1]   {count += 1}
+            if board[y+1][x-1] {count += 1}
+            if board[y-1][x]   {count += 1}
+            if board[y+1][x]   {count += 1}
+            return count
+        } 
+    } else { // is not near a corner
+        if board[y-1][x-1] {count += 1}
+        if board[y-1][x]   {count += 1}
+        if board[y-1][x+1] {count += 1}
+        
+        if board[y+1][x-1] {count += 1}
+        if board[y+1][x]   {count += 1}
+        if board[y+1][x+1] {count += 1}
+
+        if board[y][x+1] {count += 1}
+        if board[y][x-1] {count += 1}
+    }
+
+    count
+}
+
+fn check_for_damage(board: &[[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) -> (bool,bool) {
+    let (mut player1_damage, mut player2_damage) = (false,false);
+    let (mut consecutive_alive_count_1, mut consecutive_alive_count_2) = (0,0);
+    for row in board.iter() {
+        if !player1_damage {
+            if row[0] {
+                consecutive_alive_count_1 += 1;
+                if consecutive_alive_count_1 == 3 {
+                    player1_damage = true;
+                }
+            }
+        }
+
+        if !player2_damage {
+            if row[HORIZONTAL_BLOCKS - 1] {
+                consecutive_alive_count_2 += 1;
+                if consecutive_alive_count_2 == 3 {
+                    player2_damage = true;
+                }
+            }
+        }
+
+        if player1_damage && player2_damage {
+            return (true, true)
+        }
+    } 
+
+    (player1_damage,player2_damage)
+}
+
+fn make_damage_calculations(ctx: &mut Context, game: &mut Game, players_damage: (bool,bool)) {
+    if players_damage.0 {
+        game.player1.take_damage()
+    }
+    if players_damage.1 {
+        game.player2.take_damage()
+    }
+
+    if game.player1.is_dead() {
+        println!("player 2 won");
+        game.state = GameState::WINNER_SCREEN;
+    }
+    if game.player2.is_dead() {
+        println!("player 1 won");
+        game.state = GameState::WINNER_SCREEN;
+    } 
 }
 
 
@@ -406,7 +603,7 @@ impl Player {
     }
 
     pub fn is_dead(&self) -> bool {
-        self.life_color_index == 5
+        self.life_color_index == LIFE_COLORS.len() - 1
     }
 
     pub fn take_damage(&mut self) {
@@ -452,11 +649,22 @@ impl Player {
 impl Game {
     pub fn new(ctx: &mut Context) -> Game {
         Game {
-            game_state: GameState::PAUSE_MENU,
+            state: GameState::PAUSE_MENU,
+            timer: 0.0,
             player1:  Player::new(PlayerNum::ONE),
             player2:  Player::new(PlayerNum::TWO),
+            winner: Some(PlayerNum::ONE),
             board: [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.state = GameState::PLAYING;
+        self.timer = 0.0;
+        self.player1 = Player::new(PlayerNum::ONE);
+        self.player2 = Player::new(PlayerNum::TWO);
+        self.winner = Some(PlayerNum::ONE);
+        self.board = [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
     }
 }
 
