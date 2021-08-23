@@ -6,7 +6,7 @@ use std::time::Instant;
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::input::keyboard;
 use ggez::{Context, ContextBuilder, GameResult, timer};
-use ggez::graphics::{self, Color, DrawParam, FillOptions, MeshBuilder, Rect, StrokeOptions};
+use ggez::graphics::{self, Color, DrawParam, FillOptions, MeshBuilder, PxScale, Rect, StrokeOptions};
 use ggez::event::{self, EventHandler, KeyCode, KeyMods, quit};
 
 use lazy_static::lazy_static;
@@ -38,6 +38,10 @@ const GENERATION_CALCULATION_DELAY: f32 = 0.6;
 lazy_static! {
     static ref LIFE_COLORS:[Color; 6] = [Color::from_rgb(105, 212, 76), Color::from_rgb(151, 212, 76), Color::from_rgb(203, 212, 76),
                                          Color::from_rgb(219, 190, 75), Color::from_rgb(219, 157, 75), Color::from_rgb(217, 80, 56)];
+
+    static ref STROKE_MODE_1: graphics::DrawMode = graphics::DrawMode::Stroke(StrokeOptions::default().with_line_width(1.0));
+    static ref STROKE_MODE_2: graphics::DrawMode = graphics::DrawMode::Stroke(StrokeOptions::default().with_line_width(2.0));
+    static ref FILL_MODE    : graphics::DrawMode = graphics::DrawMode::Fill(FillOptions::default());
 }
 
 #[macro_use]
@@ -115,13 +119,7 @@ fn calculate_next_generation(board: &mut [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BL
 
 }
 
-fn draw_pause_menu(ctx: &Context, game: &Game) {
-    
-}
 
-fn draw_winner_screen(ctx: &Context, game: &Game) {
-
-}
 
 impl EventHandler<ggez::GameError> for Game {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
@@ -149,8 +147,8 @@ impl EventHandler<ggez::GameError> for Game {
 
         match self.game_state {
             GameState::PLAYING => draw_board(ctx, self)?,
-            GameState::PAUSE_MENU => draw_pause_menu(ctx, self),
-            GameState::WINNER_SCREEN => draw_winner_screen(ctx, self)
+            GameState::PAUSE_MENU => draw_pause_menu(ctx, self)?,
+            GameState::WINNER_SCREEN => draw_winner_screen(ctx, self)?
         }
         
         graphics::present(ctx)?;
@@ -162,6 +160,13 @@ impl EventHandler<ggez::GameError> for Game {
         if repeat {return}
         
         match key {
+            KeyCode::P => {
+                if self.game_state == GameState::PLAYING {
+                    self.game_state = GameState::PAUSE_MENU 
+                } else if self.game_state == GameState::PAUSE_MENU {
+                    self.game_state = GameState::PLAYING 
+                }
+            },
             // Player1
             KeyCode::W => {
                 let amount = if mods.contains(KeyMods::ALT) {3} else {1};
@@ -188,8 +193,8 @@ impl EventHandler<ggez::GameError> for Game {
                 }
             },
             KeyCode::Space => {
-                for p in self.player2.selected_squares.iter() {
-                    self.board[p.x][p.y] = true;
+                for p in self.player1.selected_squares.iter() {
+                    self.board[p.y][p.x] = true;
                 }
                 self.player1.selected_squares.clear();
             },
@@ -229,30 +234,27 @@ impl EventHandler<ggez::GameError> for Game {
     }
 }
 
-fn draw_board(ctx: &mut Context, game_state: &mut Game) -> GameResult<()> {
+fn draw_board(ctx: &mut Context, game: &mut Game) -> GameResult<()> {
     let mut mb = MeshBuilder::new();
-    let rect_draw_fill_mode = graphics::DrawMode::Fill(FillOptions::default());
-    let rect_draw_stroke_mode = graphics::DrawMode::Stroke(StrokeOptions::default().with_line_width(1.0));
 
     // the 2 HP bars
     mb.rectangle(
-        rect_draw_fill_mode,
+        *FILL_MODE,
         Rect::new(0.0, 0.0, HP_BAR_WIDTH, WINDOW_Y), 
         Color::GREEN
     )?;
     mb.rectangle(
-        rect_draw_fill_mode,
+        *FILL_MODE,
         Rect::new(WINDOW_X - HP_BAR_WIDTH, 0.0, HP_BAR_WIDTH, WINDOW_Y), 
         Color::GREEN
     )?;
 
     // the board
-    game_state.board[3][25] = true;
     for y in 0..VERTICAL_BLOCKS {
         for x in 0..HORIZONTAL_BLOCKS {
-            let color = if game_state.board[y][x] { Color::WHITE} else {Color::BLACK};
+            let color = if game.board[y][x] { Color::WHITE} else {Color::BLACK};
             mb.rectangle(
-                rect_draw_fill_mode,
+                *FILL_MODE,
                 Rect::new(HP_BAR_WIDTH + x as f32 * BLOCK_SIZE, y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 
                 color
             )?;
@@ -261,27 +263,27 @@ fn draw_board(ctx: &mut Context, game_state: &mut Game) -> GameResult<()> {
 
     // selectable square area bounds
     mb.rectangle(
-        rect_draw_stroke_mode,
+        *STROKE_MODE_1,
         Rect::new(AREA_1_X, BLOCK_SIZE,AREA_WIDTH,AREA_LENGTH),
         Color::from_rgb(105, 105, 105)
     )?;
     mb.rectangle(
-        rect_draw_stroke_mode,
+        *STROKE_MODE_1,
         Rect::new(AREA_2_X, BLOCK_SIZE, AREA_WIDTH, AREA_LENGTH),
         Color::from_rgb(105, 105, 105)
     )?;
 
     // player selected squares
-    for p in game_state.player1.selected_squares.iter() {
+    for p in game.player1.selected_squares.iter() {
         mb.rectangle(
-            rect_draw_stroke_mode,
+            *STROKE_MODE_2,
             Rect::new(p.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, p.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
             Color::from_rgb(94, 199, 255)
         )?;
     }
-    for p in game_state.player2.selected_squares.iter() {
+    for p in game.player2.selected_squares.iter() {
         mb.rectangle(
-            rect_draw_stroke_mode,
+            *STROKE_MODE_2,
             Rect::new(p.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, p.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
             Color::from_rgb(94, 199, 255)
         )?;
@@ -289,31 +291,87 @@ fn draw_board(ctx: &mut Context, game_state: &mut Game) -> GameResult<()> {
 
     // player hovering squares 
     mb.rectangle(
-        rect_draw_stroke_mode,
-        Rect::new(game_state.player1.hovering_square.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, game_state.player1.hovering_square.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
+        *STROKE_MODE_1,
+        Rect::new(game.player1.hovering_square.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, game.player1.hovering_square.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
         Color::from_rgb(255, 94, 207)
     )?;
     mb.rectangle(
-        rect_draw_stroke_mode,
-        Rect::new(game_state.player2.hovering_square.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, game_state.player2.hovering_square.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
+        *STROKE_MODE_1,
+        Rect::new(game.player2.hovering_square.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, game.player2.hovering_square.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
         Color::from_rgb(255, 94, 207)
     )?;
-
-    //debug line
-    // for i in 0..HORIZONTAL_BLOCKS {
-    //     mb.rectangle(
-    //         rect_draw_fill_mode,
-    //         Rect::new(i as f32 * BLOCK_SIZE + HP_BAR_WIDTH, 6.0 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
-    //         if i % 2==0 {Color::from_rgb(66, 66, 66)} else {Color::from_rgb(145, 145, 145)}
-    //     )?;
-    // }
-  
-    // mb.line(&[point![20_f32,400_f32],point![700_f32,400_f32]], 2.0, graphics::Color::BLACK)?;
 
     let mesh = &mb.build(ctx)?;
 
     graphics::draw(ctx, mesh, DrawParam::default())?;
     
+    Ok(())
+}
+
+fn draw_pause_menu(ctx: &mut Context, game: &Game) -> GameResult<()> {
+    let mut mb = MeshBuilder::new();
+
+    let (menu_x, menu_y, menu_width, menu_height) = (WINDOW_X/4.0, 100.0, WINDOW_X/2.0, 400.0);
+
+    mb.rounded_rectangle(
+        *FILL_MODE,
+        Rect::new(menu_x, menu_y, menu_width, menu_height),
+        5.0, 
+        Color::from_rgb(80, 80, 80)
+    )?;
+
+    let mesh = &mb.build(ctx)?;
+
+    graphics::draw(ctx, mesh, DrawParam::default())?;
+
+    let title = graphics::Text::new("Fight for your life!")
+            .set_bounds(pointf![menu_width,100.0], graphics::Align::Center)
+            .set_font(graphics::Font::default(), PxScale{x: 40.0, y: 40.0 })
+            .to_owned();
+    graphics::draw(
+        ctx, 
+        &title,
+        DrawParam::default().dest(pointf![menu_x + 20.0, menu_y + 10.0])
+    )?;
+
+    let descr = graphics::Text::new("Try to create shapes that follow the rules of the 'game of life',
+    and make them reach your opponent's health bar to damage it!")
+            .set_bounds(pointf![menu_width - 10.0,100.0], graphics::Align::Center)
+            .set_font(graphics::Font::default(), PxScale{x: 18.0, y: 18.0 })
+            .to_owned();
+    graphics::draw(
+        ctx, 
+        &descr,
+        DrawParam::default().dest(pointf![menu_x + 5.0, menu_y + 60.0]).color(Color::from_rgb(224, 142, 40))
+    )?;
+
+    let start = graphics::Text::new("pause/unpause (PRESS TO START) - P")
+            .set_bounds(pointf![menu_width - 10.0,100.0], graphics::Align::Center)
+            .set_font(graphics::Font::default(), PxScale{x: 22.0, y: 22.0 })
+            .to_owned();
+    graphics::draw(
+        ctx, 
+        &start,
+        DrawParam::default().dest(pointf![menu_x + 5.0, menu_y + 130.0]).color(Color::from_rgb(219, 68, 46))
+    )?;
+
+    let keys = graphics::Text::new("move selected tile :  W A S D - (Player1) , Arrows (Player2)\n
+select/deselect tile : C - (Player1) , Shift - (Player2)\n
+faster movement: hold Alt - (Player1) , hold Ctrl - (Player2)\n
+finilize selected tiles : Space - (Player1) , Enter - (Player2)")
+            .set_bounds(pointf![menu_width - 10.0,200.0], graphics::Align::Left)
+            .set_font(graphics::Font::default(), PxScale{x: 22.0, y: 22.0 })
+            .to_owned();
+    graphics::draw(
+        ctx, 
+        &keys,
+        DrawParam::default().dest(pointf![menu_x + 5.0, menu_y + 185.0])
+    )?;
+
+    Ok(())
+}
+
+fn draw_winner_screen(ctx: &mut Context, game: &Game) -> GameResult<()> {
     Ok(())
 }
 
@@ -394,7 +452,7 @@ impl Player {
 impl Game {
     pub fn new(ctx: &mut Context) -> Game {
         Game {
-            game_state: GameState::PLAYING,
+            game_state: GameState::PAUSE_MENU,
             player1:  Player::new(PlayerNum::ONE),
             player2:  Player::new(PlayerNum::TWO),
             board: [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
@@ -409,39 +467,6 @@ impl InputState {
             mark_pressed: false,
             deploy_pressed: false
         }
-    }
-}
-
-
-fn move_right_checked(player: &mut Player) {
-    if player.hovering_square.x + 1 > player._x_right_bound {
-        player.hovering_square.x = player._x_left_bound;
-    } else {
-        player.hovering_square.x += 1; 
-    }
-}
-
-fn move_up_checked(player: &mut Player) {
-    if player.hovering_square.y -1 < player._y_upper_bound {
-        player.hovering_square.y = player._y_lower_bound;
-    } else {
-        player.hovering_square.y -= 1; 
-    }
-}
-
-fn move_down_checked(player: &mut Player) {
-    if player.hovering_square.y + 1 > player._y_lower_bound {
-        player.hovering_square.y = player._y_upper_bound;
-    } else {
-        player.hovering_square.y += 1; 
-    }
-}
-
-fn move_left_checked(player: &mut Player) {
-    if player.hovering_square.x - 1 < player._x_left_bound {
-        player.hovering_square.x = player._x_right_bound;
-    } else {
-        player.hovering_square.x -= 1; 
     }
 }
 
@@ -469,7 +494,7 @@ fn main() {
         window.set_outer_position(pos);
     }
 
-    let game_state = Game::new(&mut ctx);
+    let game = Game::new(&mut ctx);
 
-    event::run(ctx, event_loop, game_state);
+    event::run(ctx, event_loop, game);
 }
