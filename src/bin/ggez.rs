@@ -15,19 +15,20 @@ type Point2i = ggez::mint::Point2<isize>;
 // BLOCK_SIZE is a common perfect divisor of WINDOW_X - 2*HP_BAR_WIDTH and WINDOW_Y.
 // Horizontal and vertical blocks are the division (WINDOW_X - 2*HP_BAR_WIDTH) / BLOCK_SIZE and WINDOW_Y / BLOCK_SIZE respectively
 // These hardcoded values should only be changed if the above conditions are met.
-const WINDOW_X     : f32 = 1502.0;
-const WINDOW_Y     : f32 = 952.0;
-const HP_BAR_WIDTH : f32 = 20.0;
-const BLOCK_SIZE   : f32 = 34.0;
-const HORIZONTAL_BLOCKS : usize = 43;
-const VERTICAL_BLOCKS   : usize = 28;
+// const WINDOW_X     : f32 = 1502.0;
+// const WINDOW_Y     : f32 = 952.0;
+// const HP_BAR_WIDTH : f32 = 20.0;
+// const BLOCK_SIZE   : f32 = 34.0;
+// const HORIZONTAL_BLOCKS : usize = 43;
+// const VERTICAL_BLOCKS   : usize = 28;
 
 // const WINDOW_X     : f32 = 1479.0;
-// const WINDOW_Y     : f32 = 957.0;
-// const HP_BAR_WIDTH : f32 = 20.0;
-// const BLOCK_SIZE   : f32 = 29.0;
-// const HORIZONTAL_BLOCKS : usize = 51;
-// const VERTICAL_BLOCKS   : usize = 33;
+const WINDOW_X     : f32 = 1519.0;
+const WINDOW_Y     : f32 = 957.0;
+const HP_BAR_WIDTH : f32 = 20.0;
+const BLOCK_SIZE   : f32 = 29.0;
+const HORIZONTAL_BLOCKS : usize = 51;
+const VERTICAL_BLOCKS   : usize = 33;
 
 const AREA_1_X : f32 = (HORIZONTAL_BLOCKS/8) as f32 * BLOCK_SIZE + HP_BAR_WIDTH;
 const AREA_2_X_OFFSET : f32 = if HORIZONTAL_BLOCKS % 2 == 0 {1.0} else {0.0};
@@ -146,7 +147,7 @@ impl EventHandler<ggez::GameError> for Game {
 
         match self.state {
             GameState::PLAYING => draw_board(ctx, self)?,
-            GameState::PAUSE_MENU => draw_pause_menu(ctx, self)?,
+            GameState::PAUSE_MENU => draw_pause_menu(ctx)?,
             GameState::WINNER_SCREEN => draw_winner_screen(ctx, self)?
         }
         
@@ -289,21 +290,34 @@ fn draw_board(ctx: &mut Context, game: &mut Game) -> GameResult<()> {
     )?;
 
     // player selected squares
-    for p in game.player1.selected_squares.iter() {
-        mb.rectangle(
-            *STROKE_MODE_2,
-            Rect::new(p.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, p.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
-            Color::from_rgb(94, 199, 255)
-        )?;
-    }
-    for p in game.player2.selected_squares.iter() {
-        mb.rectangle(
-            *STROKE_MODE_2,
-            Rect::new(p.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, p.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
-            Color::from_rgb(94, 199, 255)
-        )?;
-    }
+    let mut draw_selected_square = |player: &Player| -> GameResult{
+        for p in player.selected_squares.iter() {
+            let color = {
+                if game.board[p.y][p.x] {
+                    Color::from_rgb(202, 239, 255)
+                } else {
+                    Color::from_rgb(0, 35, 42)
+                }
+            };
+            mb.rectangle(
+                *FILL_MODE,
+                Rect::new(p.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, p.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
+                color
+            )?;
+            mb.rectangle(
+                *STROKE_MODE_1,
+                Rect::new(p.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, p.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
+                Color::from_rgb(94, 199, 255)
+            )?;
+        }
 
+        Ok(())
+    };
+
+    draw_selected_square(&game.player1)?;
+    draw_selected_square(&game.player2)?;
+
+ 
     // player hovering squares 
     mb.rectangle(
         *STROKE_MODE_1,
@@ -323,7 +337,7 @@ fn draw_board(ctx: &mut Context, game: &mut Game) -> GameResult<()> {
     Ok(())
 }
 
-fn draw_pause_menu(ctx: &mut Context, game: &Game) -> GameResult<()> {
+fn draw_pause_menu(ctx: &mut Context) -> GameResult<()> {
     let mut mb = MeshBuilder::new();
 
     let (menu_x, menu_y, menu_width, menu_height) = (WINDOW_X/4.0, 100.0, WINDOW_X/2.0, 400.0);
@@ -647,7 +661,7 @@ impl Player {
 }
 
 impl Game {
-    pub fn new(ctx: &mut Context) -> Game {
+    pub fn new() -> Game {
         Game {
             state: GameState::PAUSE_MENU,
             timer: 0.0,
@@ -702,7 +716,7 @@ fn main() {
         window.set_outer_position(pos);
     }
 
-    let game = Game::new(&mut ctx);
+    let game = Game::new();
 
     event::run(ctx, event_loop, game);
 }
