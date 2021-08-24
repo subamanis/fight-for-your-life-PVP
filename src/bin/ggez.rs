@@ -1,10 +1,10 @@
-use std::ops::Index;
 use std::path::{PathBuf};
+use std::time::{Instant};
 
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::{Context, ContextBuilder, GameResult, timer};
 use ggez::graphics::{self, Color, DrawParam, FillOptions, MeshBuilder, PxScale, Rect, StrokeOptions};
-use ggez::event::{self, EventHandler, KeyCode, KeyMods, quit};
+use ggez::event::{self, EventHandler, KeyCode, KeyMods};
 
 use lazy_static::lazy_static;
 
@@ -12,31 +12,24 @@ type Point2f = ggez::mint::Point2<f32>;
 type Point2u = ggez::mint::Point2<usize>;
 type Point2i = ggez::mint::Point2<isize>;
 
-// BLOCK_SIZE is a common perfect divisor of WINDOW_X - 2*HP_BAR_WIDTH and WINDOW_Y.
-// Horizontal and vertical blocks are the division (WINDOW_X - 2*HP_BAR_WIDTH) / BLOCK_SIZE and WINDOW_Y / BLOCK_SIZE respectively
+// BLOCK_SIZE is a common perfect divisor of INNER_X and WINDOW_Y.
+// Horizontal and vertical blocks are the division INNER_X / BLOCK_SIZE and WINDOW_Y / BLOCK_SIZE respectively
 // These hardcoded values should only be changed if the above conditions are met.
-// const WINDOW_X     : f32 = 1502.0;
-// const WINDOW_Y     : f32 = 952.0;
-// const HP_BAR_WIDTH : f32 = 20.0;
-// const BLOCK_SIZE   : f32 = 34.0;
-// const HORIZONTAL_BLOCKS : usize = 43;
-// const VERTICAL_BLOCKS   : usize = 28;
-
-// const WINDOW_X     : f32 = 1479.0;
-const WINDOW_X     : f32 = 1519.0;
-const WINDOW_Y     : f32 = 957.0;
 const HP_BAR_WIDTH : f32 = 20.0;
+const INNER_X      : f32 = 1479.0;
+const WINDOW_X     : f32 = INNER_X + 2.0 * HP_BAR_WIDTH;
+const WINDOW_Y     : f32 = 957.0;
 const BLOCK_SIZE   : f32 = 29.0;
-const HORIZONTAL_BLOCKS : usize = 51;
-const VERTICAL_BLOCKS   : usize = 33;
+const HORIZONTAL_BLOCKS : usize = (INNER_X / BLOCK_SIZE) as usize;
+const VERTICAL_BLOCKS   : usize = (WINDOW_Y / BLOCK_SIZE) as usize;
 
-const AREA_1_X : f32 = (HORIZONTAL_BLOCKS/8) as f32 * BLOCK_SIZE + HP_BAR_WIDTH;
-const AREA_2_X_OFFSET : f32 = if HORIZONTAL_BLOCKS % 2 == 0 {1.0} else {0.0};
-const AREA_2_X : f32 = ((2*HORIZONTAL_BLOCKS/3) as f32 + AREA_2_X_OFFSET) * BLOCK_SIZE + HP_BAR_WIDTH;
-const AREA_WIDTH  : f32 = (HORIZONTAL_BLOCKS/4) as f32 * BLOCK_SIZE;
+const AREA_1_X : f32 = ((HORIZONTAL_BLOCKS/8) as f32 - 3.0)* BLOCK_SIZE + HP_BAR_WIDTH;
+const AREA_2_X_OFFSET : f32 = if HORIZONTAL_BLOCKS % 2 == 0 {1.0} else {2.0};
+const MIDDLE_POINT:f32 = (HORIZONTAL_BLOCKS/2) as f32 + AREA_2_X_OFFSET;
+const AREA_2_X : f32 = ((HORIZONTAL_BLOCKS/8) as f32 + MIDDLE_POINT) * BLOCK_SIZE + HP_BAR_WIDTH;
+const AREA_WIDTH  : f32 = ((HORIZONTAL_BLOCKS/4) as f32 + 3.0) * BLOCK_SIZE;
 const AREA_LENGTH : f32 = (VERTICAL_BLOCKS-2) as f32 * BLOCK_SIZE;
 
-const DESIRED_FPS: u32 = 60;
 const GENERATION_CALCULATION_DELAY: f32 = 0.15;
 
 
@@ -114,6 +107,7 @@ struct InputState {
 struct Game {
     state: GameState,
     timer: f32,
+    last_update_time: Instant,
     player1: Player,
     player2: Player,
     winner: Option<PlayerNum>,
@@ -125,20 +119,17 @@ impl EventHandler<ggez::GameError> for Game {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
         if self.state != GameState::PLAYING {return Ok(())}
 
-        let seconds = 1.0 / DESIRED_FPS as f32;
-        self.timer += seconds;
-        
-        while timer::check_update_time(ctx, DESIRED_FPS) {
-            if self.timer < GENERATION_CALCULATION_DELAY {continue}
+        let elapsed = self.last_update_time.elapsed().as_secs_f32();
+        self.last_update_time = Instant::now();
+        self.timer += elapsed;
+        // println!("from last_update: {} \nGame timer: {}", elapsed, self.timer);
+        if self.timer >= GENERATION_CALCULATION_DELAY {
             self.timer = 0.0;
-
-            let next_gen_info = calculate_next_generation(&mut self.board);
-            
-            make_damage_calculations(ctx, self, next_gen_info.1);
-
-            self.board = next_gen_info.0;
+            let (next_board, damage_in_each_player) = calculate_next_generation(&mut self.board);
+            self.board = next_board;
+            make_damage_calculations(ctx, self, damage_in_each_player);
         }
-
+        
         Ok(())
     }
     
@@ -152,7 +143,6 @@ impl EventHandler<ggez::GameError> for Game {
         }
         
         graphics::present(ctx)?;
-        timer::yield_now();
         Ok(())
     }
 
@@ -171,9 +161,9 @@ impl EventHandler<ggez::GameError> for Game {
                 }
             },
             KeyCode::R => { 
-                if self.state == GameState::WINNER_SCREEN {
-                    self.reset();
-                }
+                if self.state == GameState::PAUSE_MENU {return}
+
+                self.reset();
             },
             KeyCode::B => { 
                 if self.state == GameState::WINNER_SCREEN {
@@ -329,6 +319,22 @@ fn draw_board(ctx: &mut Context, game: &mut Game) -> GameResult<()> {
         Rect::new(game.player2.hovering_square.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, game.player2.hovering_square.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
         Color::from_rgb(255, 94, 207)
     )?;
+
+    // debug line
+    // for i in 0..HORIZONTAL_BLOCKS {
+    //     let mut color = Color::from_rgb(60, 60, 60);
+    //     if i % 2 == 1 {
+    //         color = Color::from_rgb(190, 190, 190);
+    //     } 
+    //     if (i + 1) % 5 == 0 && i != 0 {
+    //         color = Color::from_rgb(120, 150, 56);
+    //     }
+    //     mb.rectangle(
+    //         *FILL_MODE,
+    //         Rect::new(HP_BAR_WIDTH +(i as f32 * BLOCK_SIZE), 200.0, BLOCK_SIZE, BLOCK_SIZE),
+    //         color
+    //     )?;
+    // }
 
     let mesh = &mb.build(ctx)?;
 
@@ -665,6 +671,7 @@ impl Game {
         Game {
             state: GameState::PAUSE_MENU,
             timer: 0.0,
+            last_update_time: Instant::now(),
             player1:  Player::new(PlayerNum::ONE),
             player2:  Player::new(PlayerNum::TWO),
             winner: Some(PlayerNum::ONE),
@@ -696,7 +703,7 @@ impl InputState {
 
 
 fn main() {
-    let (mut ctx, event_loop) = ContextBuilder::new("fight_for_your_life", "Petros Papatheodorou")
+    let (ctx, event_loop) = ContextBuilder::new("fight_for_your_life", "Petros Papatheodorou")
         .add_resource_path(PathBuf::from("./res"))
         .window_setup(WindowSetup::default()
             .title("Fight for your life!")
