@@ -386,7 +386,8 @@ fn draw_pause_menu(ctx: &mut Context) -> GameResult<()> {
     let keys = graphics::Text::new("move highlighted tile :  W A S D - (Player1) , Arrows (Player2)\n
 select/deselect tile : C - (Player1) , Shift - (Player2)\n
 faster movement: hold Alt - (Player1) , hold Ctrl - (Player2)\n
-finilize selected tiles : Space - (Player1) , Enter - (Player2)")
+finilize selected tiles : Space - (Player1) , Enter - (Player2)\n
+Restart: R")
             .set_bounds(pointf![menu_width - 10.0,200.0], graphics::Align::Left)
             .set_font(graphics::Font::default(), PxScale{x: 22.0, y: 22.0 })
             .to_owned();
@@ -542,6 +543,7 @@ fn check_for_damage(board: &BoardType) -> (bool,bool) {
                 consecutive_alive_count_1 += 1;
                 if consecutive_alive_count_1 == 3 {
                     player1_damage = true;
+                    break;
                 }
             }
         }
@@ -551,6 +553,7 @@ fn check_for_damage(board: &BoardType) -> (bool,bool) {
                 consecutive_alive_count_2 += 1;
                 if consecutive_alive_count_2 == 3 {
                     player2_damage = true;
+                    break;
                 }
             }
         }
@@ -573,10 +576,12 @@ fn make_damage_calculations(game: &mut Game, players_damage: (bool,bool)) {
 
     if game.player1.is_dead() {
         println!("player 2 won");
+        game.winner = Some(PlayerNum::TWO);
         game.state = GameState::WINNER_SCREEN;
     }
     if game.player2.is_dead() {
         println!("player 1 won");
+        game.winner = Some(PlayerNum::ONE);
         game.state = GameState::WINNER_SCREEN;
     } 
 }
@@ -663,7 +668,7 @@ impl Game {
             last_update_time: Instant::now(),
             player1:  Player::new(PlayerNum::ONE),
             player2:  Player::new(PlayerNum::TWO),
-            winner: Some(PlayerNum::ONE),
+            winner: None,
             board: [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
         }
     }
@@ -673,7 +678,7 @@ impl Game {
         self.timer = 0.0;
         self.player1 = Player::new(PlayerNum::ONE);
         self.player2 = Player::new(PlayerNum::TWO);
-        self.winner = Some(PlayerNum::ONE);
+        self.winner = None;
         self.board = [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
     }
 }
