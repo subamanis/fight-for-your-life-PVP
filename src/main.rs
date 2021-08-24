@@ -1,5 +1,4 @@
-use std::path::{PathBuf};
-use std::time::{Instant};
+use std::time::Instant;
 
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::{Context, ContextBuilder, GameResult, timer};
@@ -10,11 +9,10 @@ use lazy_static::lazy_static;
 
 type Point2f = ggez::mint::Point2<f32>;
 type Point2u = ggez::mint::Point2<usize>;
-type Point2i = ggez::mint::Point2<isize>;
+type BoardType = [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS];
 
 // BLOCK_SIZE is a common perfect divisor of INNER_X and WINDOW_Y.
-// Horizontal and vertical blocks are the division INNER_X / BLOCK_SIZE and WINDOW_Y / BLOCK_SIZE respectively
-// These hardcoded values should only be changed if the above conditions are met.
+// These hardcoded values should only be changed if the above condition is met.
 const HP_BAR_WIDTH : f32 = 20.0;
 const INNER_X      : f32 = 1479.0;
 const WINDOW_X     : f32 = INNER_X + 2.0 * HP_BAR_WIDTH;
@@ -46,12 +44,6 @@ lazy_static! {
 macro_rules! pointu {
     ($x:expr,$y:expr) => {
         Point2u{x:$x,y:$y}
-    }
-}
-#[macro_use]
-macro_rules! pointi {
-    ($x:expr,$y:expr) => {
-        Point2i{x:$x,y:$y}
     }
 }
 #[macro_use]
@@ -98,7 +90,7 @@ struct Player {
 
 #[derive(Debug)]
 struct InputState {
-    movement_vector: Point2i,
+    movement_vector: ggez::mint::Point2<isize>,
     mark_pressed: bool,
     deploy_pressed: bool
 }
@@ -111,23 +103,23 @@ struct Game {
     player1: Player,
     player2: Player,
     winner: Option<PlayerNum>,
-    board: [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
+    board: BoardType
 }
 
 
 impl EventHandler<ggez::GameError> for Game {
-    fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
+    fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
         if self.state != GameState::PLAYING {return Ok(())}
 
         let elapsed = self.last_update_time.elapsed().as_secs_f32();
         self.last_update_time = Instant::now();
         self.timer += elapsed;
-        // println!("from last_update: {} \nGame timer: {}", elapsed, self.timer);
+
         if self.timer >= GENERATION_CALCULATION_DELAY {
             self.timer = 0.0;
             let (next_board, damage_in_each_player) = calculate_next_generation(&mut self.board);
             self.board = next_board;
-            make_damage_calculations(ctx, self, damage_in_each_player);
+            make_damage_calculations(self, damage_in_each_player);
         }
         
         Ok(())
@@ -143,6 +135,7 @@ impl EventHandler<ggez::GameError> for Game {
         }
         
         graphics::present(ctx)?;
+        timer::yield_now();
         Ok(())
     }
 
@@ -308,7 +301,7 @@ fn draw_board(ctx: &mut Context, game: &mut Game) -> GameResult<()> {
     draw_selected_square(&game.player2)?;
 
  
-    // player hovering squares 
+    // player hovering squares
     mb.rectangle(
         *STROKE_MODE_1,
         Rect::new(game.player1.hovering_square.x as f32 * BLOCK_SIZE + HP_BAR_WIDTH, game.player1.hovering_square.y as f32 * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
@@ -390,7 +383,7 @@ fn draw_pause_menu(ctx: &mut Context) -> GameResult<()> {
         DrawParam::default().dest(pointf![menu_x + 5.0, menu_y + 130.0]).color(Color::from_rgb(219, 68, 46))
     )?;
 
-    let keys = graphics::Text::new("move selected tile :  W A S D - (Player1) , Arrows (Player2)\n
+    let keys = graphics::Text::new("move highlighted tile :  W A S D - (Player1) , Arrows (Player2)\n
 select/deselect tile : C - (Player1) , Shift - (Player2)\n
 faster movement: hold Alt - (Player1) , hold Ctrl - (Player2)\n
 finilize selected tiles : Space - (Player1) , Enter - (Player2)")
@@ -450,7 +443,7 @@ fn draw_winner_screen(ctx: &mut Context, game: &Game) -> GameResult<()> {
 //2) Any live cell with two or three live neighbours lives on to the next generation.
 //3) Any live cell with more than three live neighbours dies, as if by overpopulation.
 //4) Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction.
-fn calculate_next_generation(board: &mut [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) -> ([[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS],(bool,bool)) {
+fn calculate_next_generation(board: &mut BoardType) -> (BoardType,(bool,bool)) {
     let mut next_gen_board = [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS];
     for (y,line) in board.iter().enumerate() {
         for (x, cell) in line.iter().enumerate() {
@@ -470,7 +463,7 @@ fn calculate_next_generation(board: &mut [[bool; HORIZONTAL_BLOCKS]; VERTICAL_BL
     (next_gen_board, check_for_damage(board))
 }
 
-fn count_alive_neighbours(x: usize, y: usize, board: &[[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) -> usize {
+fn count_alive_neighbours(x: usize, y: usize, board: &BoardType) -> usize {
     let mut count = 0;
     if y == 0 || y == VERTICAL_BLOCKS - 1 || x == 0 || x == HORIZONTAL_BLOCKS - 1 {
         if y == 0 {
@@ -478,39 +471,35 @@ fn count_alive_neighbours(x: usize, y: usize, board: &[[bool; HORIZONTAL_BLOCKS]
                 if board[y+1][x]   {count += 1}
                 if board[y+1][x+1] {count += 1}
                 if board[y][x+1]   {count += 1}
-                return count
             } else if x == HORIZONTAL_BLOCKS - 1 {
                 if board[y+1][x]   {count += 1}
                 if board[y+1][x-1] {count += 1}
                 if board[y][x-1]   {count += 1}
-                return count
             } else {
                 if board[y+1][x-1] {count += 1}
                 if board[y+1][x]   {count += 1}
                 if board[y+1][x+1] {count += 1}
                 if board[y][x-1]   {count += 1}
                 if board[y][x+1]   {count += 1}
-                return count
             }
+            return count
         } else if y == VERTICAL_BLOCKS - 1 {
             if x == 0 {
                 if board[y-1][x]   {count += 1}
                 if board[y-1][x+1] {count += 1}
                 if board[y][x+1]   {count += 1}
-                return count
             } else if x == HORIZONTAL_BLOCKS - 1 {
                 if board[y-1][x]   {count += 1}
                 if board[y-1][x-1] {count += 1}
                 if board[y][x-1]   {count += 1}
-                return count
             } else {
                 if board[y-1][x-1] {count += 1}
                 if board[y-1][x]   {count += 1}
                 if board[y-1][x+1] {count += 1}
                 if board[y][x-1]   {count += 1}
                 if board[y][x+1]   {count += 1}
-                return count
             }
+            return count
         } 
 
         if x == 0 {
@@ -544,7 +533,7 @@ fn count_alive_neighbours(x: usize, y: usize, board: &[[bool; HORIZONTAL_BLOCKS]
     count
 }
 
-fn check_for_damage(board: &[[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) -> (bool,bool) {
+fn check_for_damage(board: &BoardType) -> (bool,bool) {
     let (mut player1_damage, mut player2_damage) = (false,false);
     let (mut consecutive_alive_count_1, mut consecutive_alive_count_2) = (0,0);
     for row in board.iter() {
@@ -574,7 +563,7 @@ fn check_for_damage(board: &[[bool; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]) -> (bo
     (player1_damage,player2_damage)
 }
 
-fn make_damage_calculations(ctx: &mut Context, game: &mut Game, players_damage: (bool,bool)) {
+fn make_damage_calculations(game: &mut Game, players_damage: (bool,bool)) {
     if players_damage.0 {
         game.player1.take_damage()
     }
@@ -692,7 +681,7 @@ impl Game {
 impl InputState {
     pub fn default() -> Self {
         InputState {
-            movement_vector: pointi![0,0],
+            movement_vector: ggez::mint::Point2::<isize>{x:0,y:0},
             mark_pressed: false,
             deploy_pressed: false
         }
@@ -704,7 +693,6 @@ impl InputState {
 
 fn main() {
     let (ctx, event_loop) = ContextBuilder::new("fight_for_your_life", "Petros Papatheodorou")
-        .add_resource_path(PathBuf::from("./res"))
         .window_setup(WindowSetup::default()
             .title("Fight for your life!")
             .vsync(true))
