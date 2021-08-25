@@ -79,7 +79,6 @@ enum GameState {
 #[derive(Debug)]
 struct Player {
     pub player_num: PlayerNum,
-    pub input_state: InputState,
     pub movement_cooldown_time: f32,
     pub life_color_index: usize,
     pub hovering_square: Point2u,
@@ -90,12 +89,6 @@ struct Player {
     _y_lower_bound: usize,
 }
 
-#[derive(Debug)]
-struct InputState {
-    movement_vector: ggez::mint::Point2<isize>,
-    mark_pressed: bool,
-    deploy_pressed: bool
-}
 
 #[derive(Debug)]
 struct Game {
@@ -606,7 +599,6 @@ impl Player {
 
         Player {
             player_num,
-            input_state: InputState::default(),
             movement_cooldown_time: 0.0,
             life_color_index: 0,
             hovering_square : hovering_square_point,
@@ -682,16 +674,6 @@ impl Game {
         self.player2 = Player::new(PlayerNum::TWO);
         self.winner = None;
         self.board = [[false; HORIZONTAL_BLOCKS]; VERTICAL_BLOCKS]
-    }
-}
-
-impl InputState {
-    pub fn default() -> Self {
-        InputState {
-            movement_vector: ggez::mint::Point2::<isize>{x:0,y:0},
-            mark_pressed: false,
-            deploy_pressed: false
-        }
     }
 }
 
